@@ -1,0 +1,48 @@
+---
+title: "Analyses and Projects"
+author: "Daniel Bagley"
+format:  
+  html:
+    embed-resources: true
+    theme: pulse
+    code-fold: true
+    code-line-numbers: true
+    mainfont: math
+    code-tools: true
+    toc: true
+    fig-align: "center"
+    fig-width: 6 
+    fig-asp: 0.618
+    html-math-method: katex
+editor: source
+editor_options: 
+  chunk_output_type: console
+---
+
+## Recent Analyses and Projects
+
+
+
+## Blog 
+
+## Analyses as a Student
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
