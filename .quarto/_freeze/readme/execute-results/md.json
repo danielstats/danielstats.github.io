@@ -1,0 +1,16 @@
+{
+  "hash": "f1684fc15cd2de45067a11198d044fc2",
+  "result": {
+    "markdown": "---\ntitle: \"Untitled\"\nauthor: \"Daniel Bagley\"\nformat:  \n gfm\neditor: source\neditor_options: \n  chunk_output_type: console\n---\n\n::: {.cell}\n\n```{.r .cell-code}\npacman::p_load(tidyverse)\n\nggplot(mtcars, aes(y = mpg, x = disp)) + \n  geom_point() +\n  labs(title = \"MPG according to Engine Displacement\",\n       y = \"Miles Per Gallon\",\n       x = \"Engine Displacement\")\n```\n\n::: {.cell-output-display}\n![](readme_files/figure-commonmark/unnamed-chunk-1-1.png)\n:::\n:::",
+    "supporting": [
+      "readme_files"
+    ],
+    "filters": [
+      "rmarkdown/pagebreak.lua"
+    ],
+    "includes": {},
+    "engineDependencies": {},
+    "preserve": null,
+    "postProcess": false
+  }
+}

@@ -1,0 +1,20 @@
+---
+title: "Github Pages Site"
+author: "Daniel Bagley"
+format:  
+  gfm
+editor: source
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r}
+
+pacman::p_load(tidyverse)
+
+ggplot(mtcars, aes(y = mpg, x = disp)) + 
+  geom_point() +
+  labs(title = "MPG according to Engine Displacement",
+       y = "Miles Per Gallon",
+       x = "Engine Displacement")
+```
