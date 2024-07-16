@@ -18,3 +18,5 @@ ggplot(mtcars, aes(y = mpg, x = disp)) +
        y = "Miles Per Gallon",
        x = "Engine Displacement")
 ```
+
+[Linkydindy](fountain.html)
