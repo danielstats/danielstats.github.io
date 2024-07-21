@@ -1,0 +1,67 @@
+---
+title: "Push Your Luck"
+subtitle: "An R-based Recreation of a CoolMathGames classic"
+author: "Daniel Bagley"
+format:  
+  html:
+    embed-resources: true
+    theme: lumen
+    code-fold: true
+    code-line-numbers: true
+    mainfont: math
+    code-tools: true
+    toc: true
+    fig-align: "center"
+    fig-width: 6 
+    fig-asp: 0.618
+    html-math-method:
+      method: mathjax
+      url: "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.9/latest.js?config=TeX-MML-AM_CHTML"
+editor: source
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+
+create_players <- function(num_players = 3, names = NULL){
+  cat(length(names))
+  if(length(names) != num_players) {
+    names(players) <- str_c(rep("player", num_players), as.character(1:num_players))
+  }
+  players <- rep(list(list(points = 0, bet = NULL, in_round = TRUE)), 3)
+}
+
+create_luck <- function(players)){
+  gamestate <- list(wheel = 1:13,
+                 players = players)
+  structure(gamestate,
+            class = "wheel_game")
+
+}
+
+
+# players <-rep(list(list(points = 0, bet = NULL, in_round = TRUE)), 3)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

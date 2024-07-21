@@ -1,0 +1,702 @@
+---
+title: "Garbage: Simulating a Card Game with R"
+author: "Daniel Bagley"
+format: 
+  html:
+    self-contained: true
+    theme: journal
+    code-fold: true
+    code-line-numbers: true
+    mainfont: math
+    code-tools: true
+    toc: true
+    fig-align: "center"
+    fig-width: 6
+    fig-asp: 0.618
+  gfm:
+    code_fold: true
+    code_tools: true
+editor: source
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#| label: secret code chunk
+
+pacman::p_load(tidyverse)
+
+
+#Separate the cards into two columns
+cards <- tibble(cards = mosaicData::Cards) |> 
+  separate_wider_position(cards, c(value = 1, value2 = 1, value3 = 1),
+                          too_few = "align_start") |> 
+  mutate(suit = if_else(is.na(value3), value2, value3),
+         value = if_else(is.na(value3), value, str_c(value, value2)),
+         card = mosaicData::Cards) |> 
+  select(value, suit, card)
+
+drop_cards <- 2:8 # c(2, 3, 4, 5, 6, 7, 8)
+euchre_deck <- filter(cards, ! as.numeric(value) %in% drop_cards)
+
+also_euchre_deck <- cards |> 
+  group_by(suit) |> 
+  slice_tail(n = 6)
+
+
+
+#This code chunk is broken up and repeated throughout the document; 
+# this placement is just to make sure everything loads in the right order
+
+
+delete_x_games <- function(x, start = 1){
+  for(i in start:x){
+    eval(parse(text = paste0("rm(game",i, ", envir = globalenv())")))
+  }
+}
+
+create_garbage <- function(players = c("player1", "player2"), 
+                           wilds = c("KC", "KD", "KH", "KS")){
+  gamestate <- list(deck = sample(mosaicData::Cards),
+                 discard = NULL, 
+                 active_card = NA, 
+                 wilds = wilds,
+                 players = players)
+  structure(c(gamestate, 
+              mapply(function(x) x = NULL, players),
+              mapply(function(x) x = NULL, paste0(players, "_face_up"))), 
+            class = "garbage_game")
+
+}
+
+deal_garbage_hand <- function(game, hand_sizes = c(10,10)){
+  player_names <- game$players
+  stopifnot(class(game) == "garbage_game")
+  num_players <- length(player_names)
+  #the first set of cards to deal is the smallest hand
+  hand_size_diff <- min(hand_sizes)
+  hand_size_min <- hand_size_diff #the smallest hand
+  
+  for (j in 1:length(game$players)) {
+    #set first min hand size
+    for (i in 1:num_players) {
+      player <- player_names[i]
+      eval(parse(text = paste0("game$", player, "<- c(game$", player, 
+                               ", game[[1]][seq(", i,",num_players * hand_size_diff, num_players)])")))
+      eval(parse(text = paste0("game$", player, 
+                               "_face_up <- c(game$",player,"_face_up, rep(FALSE, hand_size_diff))")))
+    }
+    #remove cards from deck
+    game[[1]] <- game[[1]][-c(1:(hand_size_diff*num_players))]
+    if (j == length(game$players)) {break}
+    #get rid of player with smallest hand and adjust hand diff
+    hand_size_min <- min(hand_sizes)
+    new_hand_sizes <- hand_sizes[hand_sizes != min(hand_sizes)]
+    if (length(new_hand_sizes) == 0) {break}
+    hand_size_diff <- min(new_hand_sizes) - hand_size_min
+    # cat("hand_size_diff: ",hand_size_diff, "\nhand_sizes: ", hand_sizes, "\nmin hand size: ", hand_size_min, "\n")
+    # cat(player_names)
+    player_names <- player_names[hand_sizes != min(hand_sizes)]
+    num_players <- length(player_names)
+    hand_sizes <- new_hand_sizes
+    # cat("players left: ", player_names, "\n this is j ", j)
+  }
+
+  game$discard <- game$deck[1]
+  game$deck <- game$deck[-1]
+  game
+}
+
+is_card_face_up <- function(game, player_name, hand_position){
+  stopifnot(class(game) == "garbage_game")
+  eval(parse(text = paste0("game$", player_name, "_face_up[", hand_position, "]")))
+}
+
+set_card_flipness <- function(game, player_name, hand_position, flipness = TRUE){
+  stopifnot(class(game) == "garbage_game")
+  eval(parse(text = paste0("game$", player_name, "_face_up[", hand_position, "] <- ", flipness)))
+  game
+}
+
+draw_card <- function(game){
+  stopifnot(class(game) == "garbage_game")
+  if(!is.na(game$active_card)){stop("cannot draw, already have an active card. Discard first.")}
+  if(length(game$deck) == 0) {
+    game$deck <- sample(game$discard[-1])
+    game$discard <- game$discard[1]
+  }
+  game$active_card <- game$deck[1]
+  game$deck <- game$deck[-1]
+  game
+}
+
+discard_playable_garbage <- function(game, player_name){
+  dis_card <- game$discard[1]
+  if(dis_card %in% game$wilds){
+    return(TRUE)
+  }
+  dis_card <- stringr::str_sub(dis_card, end = -2)
+  #deal with Aces, Jacks, Queens, and Kings.
+  if (dis_card == "A"){dis_card <- 1}
+  if (dis_card %in% c("J", "Q", "K")){return(FALSE)}
+  #now the numbers
+  dis_card <- as.numeric(dis_card)
+  #if the card is higher than the hand size, discard it
+  hand_size <- length(eval(parse(text = paste0("game$", player_name))))
+  if(dis_card > hand_size){
+    return(FALSE)
+  }
+  #if the player has a facedown card in that spot, replace it and then try to play with the replaced card
+  if(!is_card_face_up(game, player_name, dis_card)){
+    return(TRUE)
+  } else{
+    #if the card was face up, see if it's a wild or the same number
+    face_up_card <- pull_player_card(game, player_name, dis_card)
+    if(face_up_card %in% game$wilds){
+      return(TRUE) #if it's wild, replace and play the wild
+    }
+    #check if it's the same number
+    face_up_card_num <- stringr::str_sub(face_up_card, end = -2)
+    if(face_up_card_num == "A"){face_up_card_num <- 1}
+    if(face_up_card_num == dis_card) {
+      return(FALSE)
+    }
+  }
+}
+
+take_turn_garbage <- function(game, player_name, wild_strat = "rand"){
+  stopifnot(class(game) == "garbage_game")
+  # cat(game$discard, "\n")
+  if(!is.null(game$discard)){
+    if(discard_playable_garbage(game, player_name)){
+    game$active_card <- game$discard[1]
+    game$discard <- game$discard[-1]
+    }
+    else{game <- draw_card(game)}
+  }
+  else{
+    game <- draw_card(game)
+  }
+  game <- play_card_garbage(game, player_name, wild_strat)
+  # if(!is.null(game$winner)){cat(game$winner, "wins!")}
+  game
+}
+
+pull_player_card <- function(game, player_name, hand_position){
+  stopifnot(class(game) == "garbage_game")
+  eval(parse(text = paste0("game$", player_name,"[", hand_position, "]")))
+}
+
+replace_player_card <- function(game, player_name, hand_position){
+  #sets the active card in place of a particular card in player_name's hand at hand_position, then
+  #sets the card that was replaced as the active card.
+  stopifnot(class(game) == "garbage_game")
+  card_to_replace <- pull_player_card(game, player_name, hand_position)
+  eval(parse(text = paste0("game$", player_name,"[", hand_position, "] <- game$active_card")))
+  game <- set_card_flipness(game, player_name, hand_position, flipness = TRUE)
+  game$active_card <- card_to_replace
+  return(did_player_win(game, player_name))
+}
+
+did_player_win <- function(game, player_name){
+  player_face_ups <- as.character(eval(parse(text = paste0("game$", player_name, "_face_up"))))
+  face_downs_idx <- stringr::str_which(player_face_ups, "FALSE")
+  if(length(face_downs_idx) == 0){
+    game$winner <- player_name
+  }
+  return(game)
+}
+
+discard_garbage <- function(game){
+  game$discard <- c(game$active_card, game$discard)
+  game$active_card <- NA
+  game
+}
+
+play_card_garbage <- function(game, player_name, wild_strat = "rand"){
+  #deal with wilds
+  if(game$active_card %in% game$wilds){
+    # cat("wild")
+    game <- play_wild_garbage(game, player_name, wild_strat)
+    if(is.na(game$active_card)){return(game)}
+    return(play_card_garbage(game, player_name, wild_strat))
+    }
+  #now parse card number
+  card_num <- stringr::str_sub(game$active_card, end = -2)
+  #deal with Aces, Jacks, Queens, and Kings.
+  if (card_num == "A"){card_num <- 1}
+  if (card_num %in% c("J", "Q", "K"))
+    {return(discard_garbage(game))}
+  #now the numbers
+  card_num <- as.numeric(card_num)
+  #if the card is higher than the hand size, discard it
+  hand_size <- length(eval(parse(text = paste0("game$", player_name))))
+  if(card_num > hand_size){
+    return(discard_garbage(game))}
+  #if the player has a facedown card in that spot, replace it and then try to play with the replaced card
+  if(!is_card_face_up(game, player_name, card_num)){
+    game <- replace_player_card(game, player_name, card_num)
+    return(play_card_garbage(game, player_name, wild_strat))
+  } else{
+    #if the card was face up, see if it's a wild or the same number
+    face_up_card <- pull_player_card(game, player_name, card_num)
+    if(face_up_card %in% game$wilds){
+      #if it's wild, replace and play the wild
+      game <- replace_player_card(game, player_name, card_num)
+      return(play_card_garbage(game, player_name, wild_strat))
+    }
+    #check if it's the same number
+    face_up_card_num <- stringr::str_sub(face_up_card, end = -2)
+    if(face_up_card_num == "A"){
+      face_up_card_num <- 1
+      }
+    if(face_up_card_num == card_num) {
+      return(discard_garbage(game))
+    }
+  }
+}
+
+play_wild_garbage <- function(game, player_name, wild_strat = "rand"){
+  #uses one of rand, last, first to determine how to play a wild card.
+  player_face_ups <- as.character(eval(parse(text = paste0("game$", player_name, "_face_up"))))
+  face_downs_idx <- stringr::str_which(player_face_ups, "FALSE")
+  if(length(face_downs_idx) < 1){
+    return(discard_garbage(game))
+  }
+  if(wild_strat == "rand"){
+    return(replace_player_card(game, player_name, sample(face_downs_idx)[1]))
+  }
+  if(wild_strat == "last"){
+    # cat("\n", game$active_card, "deck is", game$player2, "idxs:", face_downs_idx, "idx:", max(face_downs_idx), "\n",game$player2_face_up)
+    return(replace_player_card(game, player_name, max(face_downs_idx)))
+  }
+  if(wild_strat == "first"){
+    return(replace_player_card(game, player_name, min(face_downs_idx)))
+  }
+}
+
+play_round_garbage <- function(player_names = c("player1", "player2", "Erin"), hand_sizes = c(10,10), 
+                                wild_strats = c("rand", "rand", "rand"), random_starting_player = TRUE){
+  game <- deal_garbage_hand(create_garbage(players = player_names), hand_sizes = hand_sizes)
+  j <- 0
+  if(random_starting_player == TRUE){
+      player_names <- sample(player_names)
+  }
+  while (length(game) < 10) {
+    for(i in 1:length(player_names)){
+      # cat(player_names[i])
+      game <- take_turn_garbage(game, player_names[i], wild_strats[i])
+      if(length(game) > 9) break
+    }
+    j <- j+1
+    # cat("\n", j, "\n") checkd
+  }
+
+  return(game$winner)
+}
+
+play_game_garbage <- function(player_names = c("player1", "player2"), wild_strats = c("rand", "rand"), 
+                              starting_hand = 10, silent = FALSE, random_starting_player = TRUE) {
+  player_hand_sizes <- rep(starting_hand, length(player_names))
+  winners <- rep(NA, length(player_names) * starting_hand)
+  for(i in 1:length(winners)){
+    winners[i] <- play_round_garbage(player_names = player_names, 
+                                     hand_sizes = player_hand_sizes, 
+                                     wild_strats = wild_strats)
+    player_scores <- sapply(player_names, function(x) length(grep(x, winners)))
+    if(silent == FALSE){cat("\nleaderboard: ", player_scores)}
+    player_hand_sizes <- starting_hand - player_scores
+    # cat("\n hand_sizes: ", player_hand_sizes)
+    if(min(player_hand_sizes) < 1){break}
+  }
+  return(paste0(player_names[which.min(player_hand_sizes)], " wins!"))
+}
+
+play_x_games_garbage <- function(x, silent = TRUE, ...) {
+  games <- rep(NA, x)
+  for(i in 1:x){
+    games[i] <- play_game_garbage(..., silent = TRUE)
+    if(silent == FALSE){cat(games[i])}
+  }
+  
+  return(games)
+}
+
+play_x_rounds_garbage <- function(x, ...){
+  rounds <- rep(NA, x)
+  for(i in 1:x){
+    rounds[i] <- play_round_garbage(...)
+  }
+  rounds
+}
+
+
+```
+
+This analysis will implement the game Garbage in R and determine if there are any game-winning strategies I may employ regarding wild cards. 
+
+## Introduction to Garbage
+
+Garbage, also known as Trash, is a card game traditionally played by two people and one standard deck of 52 playing cards. The dealer deals 10 face down cards to each player, which are then placed side by side in a line 10 cards long. On their turn, the player draws from the deck to replace one of the correspondingly numbered cards face down in front of them. A 3 will be placed in the third slot from the left, a 6 in the 6th, and so on up to the 10th and final slot. Once the player draws a playable card, they place it face up in the appropriate slot and look at the card that was in its place. If that card is playable, they place it face up in the correct slot and look at the next card. This continues until the player has a non-playable card, which is to say any card with a number that’s already face up, or a face card that’s not wild (Kings are wild). The player discards their non-playable card and the next player draws (from the deck or the face-up discard) to continue. Once a player has flipped all their cards face up, they win that round and the next begins. Each round, players are dealt 10 cards, minus the number of rounds they have won. So the player will first have to turn over 10 cards, then 9, then 8 to win the round. Once the player gets down to only one card, they have a chance to win the game by flipping an Ace before the other player can end the round. In other words, Garbage takes a minimum of 10 rounds and a maximum of 19 (if players switch back and forth winning each round).
+
+## Simulation Objectives
+
+I have been fascinated by this game for a long time because it is seemingly very simple, and yet I find it so often impossible to determine what will happen next. Simply trying to calculate the probability of drawing a card I need is obstructed by a number of face-down cards that may or may not contain the numbers in question, and there are many variations to game play that could affect my chances of winning. So my objective is to simulate Garbage in R in order to permute different iterations of the game. By so doing, I hope to find insights to help me win the next game of Garbage I play. 
+
+Therefore, we attempt to create a model that, although it cannot be represented succinctly with only one equation or a computer diagram, is still effective in predicting one particular thing: who will win a game of Garbage.
+
+## Converting a card game to a computer simulation
+
+Unlike human players who can comprehend, synthesize, and make creative decisions based on complex information, computers are quite bad at creatively interpreting vague stimuli. As a result, I must translate the "*way that the game is played*" into a set of strict rules and logical evaluations that allow the algorithm to play the same way a person might. The only difference will be that this computer can be given a set of instructions (strategies, hand sizes, players, etc.) and then play the game itself, returning the winner of the game into a vector which I can analyze in various ways. 
+
+### Functional Style and Instantiaion
+In order to implement Garbage, we will adopt a functional style that passes and modifies a "gamestate" object. I originally considered uisng edit-in-place methods like are used in the R6 OOP framework for R. However, I tend to find that R is, in general, much more suited to functional programming than the object-oriented equivalents, and utilizing a system like R6 is only warranted when a functional approach will not succeed at all or be incredibly difficult to implement. As I did not predict that either of those cases would be true, I eventually stuck to a functional style and created a set of functions which first create and then pass around a gamestate object, which contains the deck, discard, active card, player hands and flippedness, and a pointer that stops the turn looper when a player wins that round. Here are the instantiation functions, including the function to deal the specified amount of cards to a given subset of the players. 
+
+```{r}
+#| label: game instantiation functions
+
+
+create_garbage <- function(players = c("player1", "player2"), 
+                           wilds = c("KC", "KD", "KH", "KS")){
+  gamestate <- list(deck = sample(mosaicData::Cards),
+                 discard = NULL, 
+                 active_card = NA, 
+                 wilds = wilds,
+                 players = players)
+  structure(c(gamestate, 
+              mapply(function(x) x = NULL, players),
+              mapply(function(x) x = NULL, paste0(players, "_face_up"))), 
+            class = "garbage_game")
+
+}
+
+deal_garbage_hand <- function(game, hand_sizes = c(10,10)){
+  player_names <- game$players
+  stopifnot(class(game) == "garbage_game")
+  num_players <- length(player_names)
+  #the first set of cards to deal is the smallest hand
+  hand_size_diff <- min(hand_sizes)
+  hand_size_min <- hand_size_diff #the smallest hand
+  
+  for (j in 1:length(game$players)) {
+    #set first min hand size
+    for (i in 1:num_players) {
+      player <- player_names[i]
+      eval(parse(text = paste0("game$", player, "<- c(game$", player, 
+                               ", game[[1]][seq(", i,",num_players * hand_size_diff, num_players)])")))
+      eval(parse(text = paste0("game$", player, 
+                               "_face_up <- c(game$",player,"_face_up, rep(FALSE, hand_size_diff))")))
+    }
+    #remove cards from deck
+    game[[1]] <- game[[1]][-c(1:(hand_size_diff*num_players))]
+    if (j == length(game$players)) {break}
+    #get rid of player with smallest hand and adjust hand diff
+    hand_size_min <- min(hand_sizes)
+    new_hand_sizes <- hand_sizes[hand_sizes != min(hand_sizes)]
+    if (length(new_hand_sizes) == 0) {break}
+    hand_size_diff <- min(new_hand_sizes) - hand_size_min
+    # cat("hand_size_diff: ",hand_size_diff, "\nhand_sizes: ", hand_sizes, "\nmin hand size: ", hand_size_min, "\n")
+    # cat(player_names)
+    player_names <- player_names[hand_sizes != min(hand_sizes)]
+    num_players <- length(player_names)
+    hand_sizes <- new_hand_sizes
+    # cat("players left: ", player_names, "\n this is j ", j)
+  }
+
+  game$discard <- game$deck[1]
+  game$deck <- game$deck[-1]
+  game
+}
+
+is_card_face_up <- function(game, player_name, hand_position){
+  stopifnot(class(game) == "garbage_game")
+  eval(parse(text = paste0("game$", player_name, "_face_up[", hand_position, "]")))
+}
+
+set_card_flipness <- function(game, player_name, hand_position, flipness = TRUE){
+  stopifnot(class(game) == "garbage_game")
+  eval(parse(text = paste0("game$", player_name, "_face_up[", hand_position, "] <- ", flipness)))
+  game
+}
+
+draw_card <- function(game){
+  stopifnot(class(game) == "garbage_game")
+  if(!is.na(game$active_card)){stop("cannot draw, already have an active card. Discard first.")}
+  if(length(game$deck) == 0) {
+    game$deck <- sample(game$discard[-1])
+    game$discard <- game$discard[1]
+  }
+  game$active_card <- game$deck[1]
+  game$deck <- game$deck[-1]
+  game
+}
+
+discard_playable_garbage <- function(game, player_name){
+  dis_card <- game$discard[1]
+  if(dis_card %in% game$wilds){
+    return(TRUE)
+  }
+  dis_card <- stringr::str_sub(dis_card, end = -2)
+  #deal with Aces, Jacks, Queens, and Kings.
+  if (dis_card == "A"){dis_card <- 1}
+  if (dis_card %in% c("J", "Q", "K")){return(FALSE)}
+  #now the numbers
+  dis_card <- as.numeric(dis_card)
+  #if the card is higher than the hand size, discard it
+  hand_size <- length(eval(parse(text = paste0("game$", player_name))))
+  if(dis_card > hand_size){
+    return(FALSE)
+  }
+  #if the player has a facedown card in that spot, replace it and then try to play with the replaced card
+  if(!is_card_face_up(game, player_name, dis_card)){
+    return(TRUE)
+  } else{
+    #if the card was face up, see if it's a wild or the same number
+    face_up_card <- pull_player_card(game, player_name, dis_card)
+    if(face_up_card %in% game$wilds){
+      return(TRUE) #if it's wild, replace and play the wild
+    }
+    #check if it's the same number
+    face_up_card_num <- stringr::str_sub(face_up_card, end = -2)
+    if(face_up_card_num == "A"){face_up_card_num <- 1}
+    if(face_up_card_num == dis_card) {
+      return(FALSE)
+    }
+  }
+}
+
+pull_player_card <- function(game, player_name, hand_position){
+  stopifnot(class(game) == "garbage_game")
+  eval(parse(text = paste0("game$", player_name,"[", hand_position, "]")))
+}
+
+replace_player_card <- function(game, player_name, hand_position){
+  #sets the active card in place of a particular card in player_name's hand at hand_position, then
+  #sets the card that was replaced as the active card.
+  stopifnot(class(game) == "garbage_game")
+  card_to_replace <- pull_player_card(game, player_name, hand_position)
+  eval(parse(text = paste0("game$", player_name,"[", hand_position, "] <- game$active_card")))
+  game <- set_card_flipness(game, player_name, hand_position, flipness = TRUE)
+  game$active_card <- card_to_replace
+  return(did_player_win(game, player_name))
+}
+
+discard_garbage <- function(game){
+  game$discard <- c(game$active_card, game$discard)
+  game$active_card <- NA
+  game
+}
+
+
+```
+
+### Logic Implementation
+
+After creating a Garbage gamestate, I now needed to have players take turns. Therefore, I designed a set of functions which would take the drawn card and attempt to play it, then discard once all possible cards have been played that turn. While the game instantiation functions were difficult to write conceptually, these functions presented the "brain" of the simulation; the code that decides what to do with whatever card the player drew. As a result, these functions were constantly being updated and refined until I was happy with their behavior.
+
+```{r}
+#| label: logic_funcs
+
+play_card_garbage <- function(game, player_name, wild_strat = "rand"){
+  #deal with wilds
+  if(game$active_card %in% game$wilds){
+    # cat("wild")
+    game <- play_wild_garbage(game, player_name, wild_strat)
+    if(is.na(game$active_card)){return(game)}
+    return(play_card_garbage(game, player_name, wild_strat))
+    }
+  #now parse card number
+  card_num <- stringr::str_sub(game$active_card, end = -2)
+  #deal with Aces, Jacks, Queens, and Kings.
+  if (card_num == "A"){card_num <- 1}
+  if (card_num %in% c("J", "Q", "K"))
+    {return(discard_garbage(game))}
+  #now the numbers
+  card_num <- as.numeric(card_num)
+  #if the card is higher than the hand size, discard it
+  hand_size <- length(eval(parse(text = paste0("game$", player_name))))
+  if(card_num > hand_size){
+    return(discard_garbage(game))}
+  #if the player has a facedown card in that spot, replace it and then try to play with the replaced card
+  if(!is_card_face_up(game, player_name, card_num)){
+    game <- replace_player_card(game, player_name, card_num)
+    return(play_card_garbage(game, player_name, wild_strat))
+  } else{
+    #if the card was face up, see if it's a wild or the same number
+    face_up_card <- pull_player_card(game, player_name, card_num)
+    if(face_up_card %in% game$wilds){
+      #if it's wild, replace and play the wild
+      game <- replace_player_card(game, player_name, card_num)
+      return(play_card_garbage(game, player_name, wild_strat))
+    }
+    #check if it's the same number
+    face_up_card_num <- stringr::str_sub(face_up_card, end = -2)
+    if(face_up_card_num == "A"){
+      face_up_card_num <- 1
+      }
+    if(face_up_card_num == card_num) {
+      return(discard_garbage(game))
+    }
+  }
+}
+
+play_wild_garbage <- function(game, player_name, wild_strat = "rand"){
+  #uses one of rand, last, first to determine how to play a wild card.
+  player_face_ups <- as.character(eval(parse(text = paste0("game$", player_name, "_face_up"))))
+  face_downs_idx <- stringr::str_which(player_face_ups, "FALSE")
+  if(length(face_downs_idx) < 1){
+    return(discard_garbage(game))
+  }
+  if(wild_strat == "rand"){
+    return(replace_player_card(game, player_name, sample(face_downs_idx)[1]))
+  }
+  if(wild_strat == "last"){
+    # cat("\n", game$active_card, "deck is", game$player2, "idxs:", face_downs_idx, "idx:", max(face_downs_idx), "\n",game$player2_face_up)
+    return(replace_player_card(game, player_name, max(face_downs_idx)))
+  }
+  if(wild_strat == "first"){
+    return(replace_player_card(game, player_name, min(face_downs_idx)))
+  }
+}
+
+play_round_garbage <- function(player_names = c("player1", "player2", "Erin"), hand_sizes = c(10,10), 
+                                wild_strats = c("rand", "rand", "rand"), random_starting_player = TRUE){
+  game <- deal_garbage_hand(create_garbage(players = player_names), hand_sizes = hand_sizes)
+  j <- 0
+  if(random_starting_player == TRUE){
+      player_names <- sample(player_names)
+  }
+  while (length(game) < 10) {
+    for(i in 1:length(player_names)){
+      # cat(player_names[i])
+      game <- take_turn_garbage(game, player_names[i], wild_strats[i])
+      if(length(game) > 9) break
+    }
+    j <- j+1
+    # cat("\n", j, "\n") checkd
+  }
+
+  return(game$winner)
+}
+
+play_game_garbage <- function(player_names = c("player1", "player2"), wild_strats = c("rand", "rand"), 
+                              starting_hand = 10, silent = FALSE, random_starting_player = TRUE) {
+  player_hand_sizes <- rep(starting_hand, length(player_names))
+  winners <- rep(NA, length(player_names) * starting_hand)
+  for(i in 1:length(winners)){
+    winners[i] <- play_round_garbage(player_names = player_names, 
+                                     hand_sizes = player_hand_sizes, 
+                                     wild_strats = wild_strats)
+    player_scores <- sapply(player_names, function(x) length(grep(x, winners)))
+    if(silent == FALSE){cat("\nleaderboard: ", player_scores)}
+    player_hand_sizes <- starting_hand - player_scores
+    # cat("\n hand_sizes: ", player_hand_sizes)
+    if(min(player_hand_sizes) < 1){break}
+  }
+  return(paste0(player_names[which.min(player_hand_sizes)], " wins!"))
+}
+
+```
+
+### Iterated gameplay
+
+Lastly, once all the game systems were in place, I constructed a set of functions to help me debug and a set to iterate over many observations (play the game for me lots of times):
+
+```{r}
+#| label: permute_code
+
+increase_num_take_turn <- function(game1 = game1, players = c("player1", "player2")){
+  for(i in seq(2,15,length(players))){
+    for(j in 1:length(players)){
+      assign(paste0("game", i-1+j),
+             eval(parse(text = paste0("take_turn_garbage(game", i-2+j, ", players[j])"))), globalenv())
+      if(!is.null(game$winner)){break}
+    }
+  }
+}
+
+# game1 <- deal_garbage_hand(create_garbage())
+# increase_num_take_turn(game1)
+
+
+delete_x_games <- function(x, start = 1){
+  for(i in start:x){
+    eval(parse(text = paste0("rm(game",i, ", envir = globalenv())")))
+  }
+}
+
+
+```
+
+
+## Simulation Results
+Now that we have implemented Garbage, it is time to do some simulating and see the results! The crucial step here is to define the way we want the "player" to play, and then repeat those circumstances over and over until we begin to see a proportion which approaches the true proportion of successes (round victories) when the player is under those conditions. We will iterate 5000 times for each condition (pair of hand sizes), which means each strategy we analyze will contain 500,000 observed rounds of Garbage. To prevent this document from taking 100 years to render each time, I performed these tests and then saved the results in several .csv files. 
+
+Here is the data from a run where the first player always plays their wild card in the last possible slot (the highest face down number):
+
+```{r}
+
+last_start_rand_props <- rio::import("project_data/pl1_last_start_rand_props.csv")
+
+knitr::kable(last_start_rand_props)
+
+
+```
+
+Note that the proportion of wins for player one under these conditions increase from bottom left to top right, this would indicate that having fewer cards than your opponent increases your chances of winning the round. However, also examine the diagonal, where both players have the same number of cards. Nearly all of these percentages are greater than 0.5; which doesn't seem likely. After, all, if both computer players use the same strategy and the cards are randomized, then over 10,000 games we would expect the proportion of wins for computer 1 vs. computer 2 to approach exactly 0.5. However, this does not appear to be the case. What could be causeing this behavior?
+The only clear difference between player 1 and player 2 is that, because of the initial way I wrote the code, player 1 always goes first unless you specify a starting player. Therefore, could these greater than 50% chance to win the game proportions be a result of who got to go first?
+
+## Considering the First Player
+
+Because it seems that the first player had an advantage in those matrices, I also consider whether going first actually increases your chances of winning the round. To do so, I ran $10,000$ runs each under the following conditions:
+
+
+| Player Condition   | Hand Size | Pl_1 Win Proportion |
+|--------------------|-------|-------|
+| Random Starter     | 10, 10| 0.4957|
+| Random Starter     | 1, 1  | 0.5001|
+| Player 1 Starts    | 10, 10| 0.5485|
+| Player 1 Starts    | 1, 1. | 0.6144|
+| Player 1 Starts (L)| 10, 10| 0.5366|
+
+As we can see, there is a slight difference in who wins the round based on who goes first. After 10,000 runs, we would expect (as we see n the first two) the proportion to be very close to 0.5, which would mean that going first doesn't affect your chances of winning. However, for those games where player 1 went first every time, the proportions are higher than 0.5, with the (1,1) hand size reporting that player 1 wins almost 2/3 of the time, as long as they go first.
+
+## Conclusion and Future Research
+
+While this analysis successfully implemented the basic version of the game Garbage, there are several game variants I would like to investigate. For instance, how do win probabilities change when playing with 3 or more players instead of 2? Or would the benefit of going first go away if the loser got an extra turn after the round winner and could also turn all of their cards over? This would mean that it is possible to tie instead of winning outright; another potential outcome and an interesting question to consider in the future. 
+
+While I did not use a lot of the probability modeling skills I learned from this class (nor from MATH 423) in completing this project, I still feel that it was very interesting from a probabilistic standpoint. For instance, it was pointed out during a live presentation of these findings that the win ratios accompanying each hand size increase from left to right and then peak around 7 or 8 cards (for player 2), before descending slightly again. This is a very intriguing result, and may possibly be due to the interaction between the number of cards that need to be turned over and the number of "junk" cards in the deck, which increases as your hand size decreases. I would like to investigate that further.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

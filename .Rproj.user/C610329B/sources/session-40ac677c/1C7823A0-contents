@@ -1,0 +1,186 @@
+#Lesson 9: Strappin Da Bootz
+
+sample_and_stat <- function(dat, n, fun) {
+  x <- sample(dat, size = n, replace = TRUE)
+  fun(x)
+}
+
+bootstrap <- function(data, N, fun, conf = 0.95, return_vars = FALSE){
+  n <- length(data)
+  obs_var <- fun(data)
+  cleveh <- (1 - conf) / 2
+  boot_vars <- unlist(map(rep(list(data), N), \(x) sample_and_stat(x, n, fun))) - obs_var
+  boot_vars <- obs_var - boot_vars
+  if(return_vars) return(boot_vars)
+  quantile(boot_vars, c(cleveh, 1 - cleveh))
+}
+
+
+
+
+#2 90% conf int for variance of normal with (70.5, 8) 
+# Obviously it's 64 (rnorm and all) but what if I don't know that?
+set.seed(15)
+obs <- rnorm(48, 70.5, 8) |> 
+  round(1)
+obs_var <- var(obs)
+N <- 1000
+n <- length(obs)
+boot_vars <- rep(NA, N)
+for(i in 1:N) {
+  x <- sample(obs, size = n, replace = TRUE)
+  boot_vars[i] <- var(x)
+}
+boot_var_diffs <- boot_vars - obs_var
+boot_variances <- obs_var - boot_var_diffs 
+quantile(boot_variances, c(0.05, 0.95))
+
+
+
+#3
+# a Calculate 95% confidence interval for median trip distance
+taxi_data <- rio::import("https://emp.byui.edu/johnsonc/data/taxi_trips.xlsx")
+X <- taxi_data$trip_distance
+obs_stat <- median(X)
+N <- 1000
+n <- length(X)
+boot_stats <- rep(NA, N)
+for(i in 1:N) {
+  x <- sample(X, size = n, replace = TRUE)
+  boot_stats[i] <- median(x)
+}
+boot_stat_diffs <- boot_stats - obs_stat
+boot_statistics <- obs_stat - boot_stat_diffs
+quantile(boot_statistics, c(0.025, 0.975))
+
+# b 95% bootstrap confidence interval for slope of regression line total_amount ~ trip_duration
+
+taxil <- lm(total_amount ~ trip_duration, data = taxi_data)
+
+obs_stat <- coef(taxil)[2]
+N <- 1000
+n <- length(X)
+boot_stats <- rep(NA, N)
+for(i in 1:N) {
+  taxes <- taxi_data[sample(1:n, replace = TRUE),]
+  taxil_boot <- lm(total_amount ~ trip_duration, data = taxes)
+  boot_stats[i] <- coef(taxil_boot)[2]
+}
+boot_stat_diffs <- boot_stats - obs_stat
+boot_statistics <- obs_stat - boot_stat_diffs 
+uplows <- quantile(boot_statistics, c(0.025, 0.975))
+
+b <- coef(taxil)
+ggplot(taxi_data, aes(y = total_amount, x = trip_duration)) + 
+  geom_point() +
+  stat_function(fun = function(x) b[1] + b[2] * x ) +
+  stat_function(fun = function(x) b[1] + uplows[1] * x , color = "grey50") +
+  stat_function(fun = function(x) b[1] + uplows[2] * x , color = "grey50") +
+  labs(title = "Bootstrap Estimates of slope",
+       subtitle = "Taxi Data",
+       x = "Trip Duration",
+       y = "Total Amount (USD)")
+
+
+#4
+
+salads <- rio::import("https://emp.byui.edu/johnsonc/data/salad_weights.xlsx")
+X <- salads$weights
+obs_stat <- (sd(X) / mean(X)) * 100
+N <- 1000
+n <- length(X)
+boot_stats <- rep(NA, N)
+for(i in 1:N) {
+  x <- sample(X, n, replace = TRUE)
+  boot_stats[i] <- (sd(x) / mean(x)) * 100
+}
+boot_stat_diffs <- boot_stats - obs_stat
+boot_statistics <- obs_stat - boot_stat_diffs 
+quantile(boot_statistics, c(0.05, 0.95))
+
+
+
+#5
+bronclo <- rep(NA, 100)
+bronci <- rep(NA, 100)
+N <- 5000
+
+for(k in 1:100){
+  X <- rexp(n = 25, rate = 0.001)
+  n <- length(X)
+  obs_stat <- mean(expy)
+  boot_stats <- rep(NA, N)
+  for(i in 1:N) {
+    x <- sample(X, n, replace = TRUE)
+    boot_stats[i] <- mean(x)
+  }
+  boot_stat_diffs <- boot_stats - obs_stat
+  boot_statistics <- obs_stat - boot_stat_diffs 
+  integrater <- quantile(boot_statistics, c(0.05, 0.95))
+  bronclo[k] <- integrater[1]
+  bronci[k] <- integrater[2]
+}
+
+table(bronclo > 1000)
+table(bronci < 1000)
+
+
+
+
+
+#bootstrap y-intercept for 3b
+
+taxil <- lm(total_amount ~ trip_duration, data = taxi_data)
+
+obs_stat <- coef(taxil)[1]
+N <- 1000
+n <- length(X)
+boot_stats <- rep(NA, N)
+for(i in 1:N) {
+  taxes <- taxi_data[sample(1:n, replace = TRUE),]
+  taxil_boot <- lm(total_amount ~ trip_duration, data = taxes)
+  boot_stats[i] <- coef(taxil_boot)[1]
+}
+boot_stat_diffs <- boot_stats - obs_stat
+boot_statistics <- obs_stat - boot_stat_diffs 
+uplows <- quantile(boot_statistics, c(0.025, 0.975))
+
+b <- coef(taxil)
+ggplot(taxi_data, aes(y = total_amount, x = trip_duration)) + 
+  geom_point() +
+  stat_function(fun = function(x) b[1] + b[2] * x ) +
+  stat_function(fun = function(x) uplows[1] + b[2] * x , color = "grey50") +
+  stat_function(fun = function(x) uplows[2] + b[2] * x , color = "grey50") +
+  labs(title = "Bootstrap Estimates of y-intercept",
+       subtitle = "Taxi Data",
+       x = "Trip Duration",
+       y = "Total Amount (USD)")
+
+
+
+
+
+
+
+
+#Exam 1
+
+sumdist <- c(67.5, 70, 89, 90.5, 65, 78.5, 82.4, 84.1, 54.3, 74.5, 94.2, 77)
+
+X <- sumdist
+obs_stat <- median(X)
+N <- 50000
+n <- length(X)
+boot_stats <- rep(NA, N)
+for(i in 1:N) {
+  x <- sample(X, size = n, replace = TRUE)
+  boot_stats[i] <- median(x)
+}
+boot_stat_diffs <- boot_stats - obs_stat
+boot_statistics <- obs_stat - boot_stat_diffs
+quantile(boot_statistics, c(0.025, 0.975))
+
+
+
+
+

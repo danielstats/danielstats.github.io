@@ -19,4 +19,5 @@ ggplot(mtcars, aes(y = mpg, x = disp)) +
        x = "Engine Displacement")
 ```
 
-[Linkydindy](fountain.html)
+[Analysis of A Water Fountain](fountain.html)
+
